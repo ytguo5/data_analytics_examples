@@ -1,0 +1,167 @@
+---
+title: "YutingGuo_HW8"
+author: "Yuting Guo"
+date: "11/21/2021"
+output: pdf_document
+---
+Problem 1
+(c) Which spectra from part 1c. would be easiest to detect, given the reflectance values in the viewer?
+    I think it is Melting Snow, because it has a bigger difference of reflectance in different wavelength.
+    
+Problem 2
+(a) Plot Band 3 in the s2data object. Include a screenshot of your plot.
+(b) Modify the training test split from 70:30 to 80:20 and re-run the model training from
+lab. Report the new model accuracy. Did anything change? Was this expected?
+```{r}
+# (a)
+# Load the Sentinel-2 stack of the study area, from the raster library
+s2data = raster::stack("S2StackSmall.tif")
+# Name the layers of the Sentinel-2 stack based on previously saved information
+names(s2data) = as.character(read.csv("S2StackSmall_Names.csv")[,1])
+# plot the Band 3 data. 
+plot(s2data$B03M)
+
+```
+
+
+
+```{r}
+# In our case, we will use premade samples 
+samples = read.csv("Samples.csv")
+
+# Split the data frame into 70-30 by class
+trainx = list(0)
+evalx = list(0)
+for (i in 1:8){ # loop through all eight classes
+  cls = samples[samples$class == i,]
+  smpl <- floor(0.80 * nrow(cls))
+  tt <- sample(seq_len(nrow(cls)), size = smpl)
+  trainx[[i]] <- cls[tt,]
+  evalx[[i]] <- cls[-tt,]
+}
+
+# combine them all into training and evaluation data frames
+trn = do.call(rbind, trainx) 
+eva = do.call(rbind, evalx)
+# Set up a resampling method in the model training process
+tc <- caret::trainControl(method = "repeatedcv", # repeated cross-validation of the training data
+                   number = 10, # number of folds
+                   repeats = 5, # number of repeats
+                   allowParallel = TRUE, # allow use of multiple cores if specified in training
+                   verboseIter = TRUE) # view the training iterations
+
+nnet.grid = expand.grid(size = seq(from = 2, to = 10, by = 2), # number of neurons units in the hidden layer 
+                        decay = seq(from = 0.1, to = 0.5, by = 0.1)) # regularization parameter to avoid over-fitting 
+rf.grid <- expand.grid(mtry=1:20) # number of variables available for splitting at each tree node
+svm.grid <- expand.grid(sigma=seq(from = 0.01, to = 0.10, by = 0.02), # controls for non-linearity in the hyperplane
+                        C=seq(from = 2, to = 10, by = 2)) # controls the influence of each support vector
+# Train the neural network model
+nnet_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "nnet", metric="Accuracy", trainControl = tc, tuneGrid = nnet.grid)
+# Train the random forest model
+rf_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "rf", metric="Accuracy", trainControl = tc, tuneGrid = rf.grid)
+# Train the support vector machines model
+svm_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "svmRadialSigma", metric="Accuracy", trainControl = tc, tuneGrid = svm.grid)
+# Apply the neural network model to the Sentinel-2 data. 
+nnet_prediction = raster::predict(s2data, model=nnet_model)
+
+# Apply the random forest model to the Sentinel-2 data
+rf_prediction = raster::predict(s2data, model=rf_model)
+
+# Apply the support vector machines model to the Sentinel-2 data
+svm_prediction = raster::predict(s2data, model=svm_model)
+
+# Convert the evaluation data into a spatial object using the X and Y coordinates and extract predicted values
+eva.sp = SpatialPointsDataFrame(coords = cbind(eva$x, eva$y), data = eva, 
+                                proj4string = crs("+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+# neural network
+nnet_Eval = raster::extract(nnet_prediction, eva.sp)
+# random forest
+rf_Eval = raster::extract(rf_prediction, eva.sp)
+# support vector machines
+svm_Eval = raster::extract((svm_prediction), eva.sp)
+
+# Create an error matrix for each of the classifiers
+nnet_errorM = confusionMatrix(as.factor(nnet_Eval),as.factor(eva$class)) # nnet is a poor classifier, so it will not capture all the classes
+rf_errorM = confusionMatrix(as.factor(rf_Eval),as.factor(eva$class))
+svm_errorM = confusionMatrix(as.factor(svm_Eval),as.factor(eva$class))
+
+paste0("  Neural net accuracy:  ", round(nnet_errorM$overall[1],2))
+paste0("  Random Forest accuracy:  ", round(rf_errorM$overall[1],2))
+paste0("  SVM accuracy:  ", round(svm_errorM$overall[1],2))
+
+
+
+```
+
+```{r}
+# In our case, we will use premade samples 
+samples = read.csv("Samples.csv")
+
+# Split the data frame into 70-30 by class
+trainx = list(0)
+evalx = list(0)
+for (i in 1:8){ # loop through all eight classes
+  cls = samples[samples$class == i,]
+  smpl <- floor(0.70 * nrow(cls))
+  tt <- sample(seq_len(nrow(cls)), size = smpl)
+  trainx[[i]] <- cls[tt,]
+  evalx[[i]] <- cls[-tt,]
+}
+
+# combine them all into training and evaluation data frames
+trn = do.call(rbind, trainx) 
+eva = do.call(rbind, evalx)
+# Set up a resampling method in the model training process
+tc <- caret::trainControl(method = "repeatedcv", # repeated cross-validation of the training data
+                   number = 10, # number of folds
+                   repeats = 5, # number of repeats
+                   allowParallel = TRUE, # allow use of multiple cores if specified in training
+                   verboseIter = TRUE) # view the training iterations
+
+nnet.grid = expand.grid(size = seq(from = 2, to = 10, by = 2), # number of neurons units in the hidden layer 
+                        decay = seq(from = 0.1, to = 0.5, by = 0.1)) # regularization parameter to avoid over-fitting 
+rf.grid <- expand.grid(mtry=1:20) # number of variables available for splitting at each tree node
+svm.grid <- expand.grid(sigma=seq(from = 0.01, to = 0.10, by = 0.02), # controls for non-linearity in the hyperplane
+                        C=seq(from = 2, to = 10, by = 2)) # controls the influence of each support vector
+# Train the neural network model
+nnet_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "nnet", metric="Accuracy", trainControl = tc, tuneGrid = nnet.grid)
+# Train the random forest model
+rf_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "rf", metric="Accuracy", trainControl = tc, tuneGrid = rf.grid)
+# Train the support vector machines model
+svm_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "svmRadialSigma", metric="Accuracy", trainControl = tc, tuneGrid = svm.grid)
+# Apply the neural network model to the Sentinel-2 data. 
+nnet_prediction = raster::predict(s2data, model=nnet_model)
+
+# Apply the random forest model to the Sentinel-2 data
+rf_prediction = raster::predict(s2data, model=rf_model)
+
+# Apply the support vector machines model to the Sentinel-2 data
+svm_prediction = raster::predict(s2data, model=svm_model)
+
+# Convert the evaluation data into a spatial object using the X and Y coordinates and extract predicted values
+eva.sp = SpatialPointsDataFrame(coords = cbind(eva$x, eva$y), data = eva, 
+                                proj4string = crs("+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+# neural network
+nnet_Eval = raster::extract(nnet_prediction, eva.sp)
+# random forest
+rf_Eval = raster::extract(rf_prediction, eva.sp)
+# support vector machines
+svm_Eval = raster::extract((svm_prediction), eva.sp)
+
+# Create an error matrix for each of the classifiers
+nnet_errorM = confusionMatrix(as.factor(nnet_Eval),as.factor(eva$class)) # nnet is a poor classifier, so it will not capture all the classes
+rf_errorM = confusionMatrix(as.factor(rf_Eval),as.factor(eva$class))
+svm_errorM = confusionMatrix(as.factor(svm_Eval),as.factor(eva$class))
+
+paste0("  Neural net accuracy:  ", round(nnet_errorM$overall[1],2))
+paste0("  Random Forest accuracy:  ", round(rf_errorM$overall[1],2))
+paste0("  SVM accuracy:  ", round(svm_errorM$overall[1],2))
+```
+```{r}
+```
